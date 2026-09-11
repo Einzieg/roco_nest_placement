@@ -99,6 +99,10 @@
     return incompatible;
   }
 
+  function countCompatiblePairs(groups0, groups1) {
+    return groups0.reduce((total, groups) => total + groups1.filter(other => canBreed(groups, other)).length, 0);
+  }
+
   function getSpriteTypeConfig(type) {
     return SPRITE_CONFIG[type === "optional" ? "optional" : "mandatory"];
   }
@@ -123,6 +127,21 @@
     const idx = cfg.list.findIndex(s => s.id === id);
     if (idx !== -1) cfg.list.splice(idx, 1);
     cfg.render();
+  }
+
+  function setSetupError(message) {
+    const errorEl = document.getElementById("setup-error");
+    if (!errorEl) return;
+    errorEl.textContent = message || "";
+    errorEl.hidden = !message;
+  }
+
+  function updateSpriteSummary() {
+    const summaryEl = document.getElementById("sprite-summary");
+    if (!summaryEl) return;
+    const mandatory = countSpritesByGender(MandatorySprites);
+    const optional = countSpritesByGender(OptionalSprites);
+    summaryEl.textContent = `必选 ${MandatorySprites.length}（♀${mandatory.female} / ♂${mandatory.male}） · 可选 ${OptionalSprites.length}（♀${optional.female} / ♂${optional.male}）`;
   }
 
   function updateEggGroupTrigger(type, id, eggGroups) {
@@ -171,7 +190,9 @@
 
   function setOptionalReuseCount(id, value) {
     const count = normalizeOptionalReuseCount(value);
-    return setSpriteField("optional", id, "reusable", count) ? count : 1;
+    const sprite = setSpriteField("optional", id, "reusable", count);
+    if (sprite) updateOptionalInfo();
+    return sprite ? count : 1;
   }
 
   function adjustOptionalReuseCount(id, delta) {
@@ -350,6 +371,24 @@
     const label = document.createElement("span");
     label.className = "sprite-label";
     label.textContent = `${cfg.labelPrefix} ${idx + 1}`;
+    if (type === "optional") {
+      const priority = document.createElement("span");
+      priority.className = "sprite-priority";
+      [[-1, "↑", "提高优先级"], [1, "↓", "降低优先级"]].forEach(([delta, text, description]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = text;
+        button.title = description;
+        button.setAttribute("aria-label", `${cfg.labelPrefix} ${idx + 1}${description}`);
+        button.disabled = idx + delta < 0 || idx + delta >= cfg.list.length;
+        button.onclick = () => {
+          [cfg.list[idx], cfg.list[idx + delta]] = [cfg.list[idx + delta], cfg.list[idx]];
+          cfg.render();
+        };
+        priority.appendChild(button);
+      });
+      label.appendChild(priority);
+    }
     row.appendChild(label);
 
     row.append(
@@ -369,9 +408,19 @@
     const list = document.getElementById(cfg.listId);
     if (!list) return;
     list.innerHTML = "";
-    cfg.list.forEach((sprite, idx) => list.appendChild(createSpriteRow(type, sprite, idx)));
+    if (cfg.list.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "sprite-empty-state";
+      empty.innerHTML = type === "mandatory"
+        ? "尚未添加必选精灵<span>不指定精灵时，将按性别数量计算通用排布</span>"
+        : "尚未添加可选精灵<span>需要指定精灵池时，再添加可选精灵</span>";
+      list.appendChild(empty);
+    } else {
+      cfg.list.forEach((sprite, idx) => list.appendChild(createSpriteRow(type, sprite, idx)));
+    }
     if (type === "optional") updateOptionalPoolControls();
     updateOptionalInfo();
+    updateSpriteSummary();
   }
 
   function getOptionalSelection(gender, needed, onlyFromOptional) {
@@ -428,8 +477,8 @@
   }
 
   function getSolveSetup() {
-    const n = parseInt(document.getElementById("input-n").value) || 0;
-    const k = parseInt(document.getElementById("input-k").value) || 0;
+    const n = Number(document.getElementById("input-n").value);
+    const k = Number(document.getElementById("input-k").value);
     const mandatoryCounts = countSpritesByGender(MandatorySprites);
     const onlyFromOptionalEl = document.getElementById("chk-only-optional");
     return {
@@ -443,13 +492,13 @@
   }
 
   function validateSolveSetup(setup) {
-    if (setup.n < 2 || setup.n > 11) return "小窝总数必须在 2-11 之间";
+    if (!Number.isInteger(setup.n) || setup.n < 2 || setup.n > 11) return "小窝总数必须是 2-11 之间的整数";
     if (MandatorySprites.length > setup.n) {
       return `必选精灵数量（${MandatorySprites.length}）不能超过小窝总数（${setup.n}）`;
     }
     if (!MandatorySprites.every(hasEggGroups)) return "每个必选精灵至少需要选择1个蛋组";
     if (!OptionalSprites.every(hasEggGroups)) return "每个可选精灵至少需要选择1个蛋组";
-    if (setup.k < 1 || setup.k >= setup.n) return "雌性精灵数量必须在 1 到 n-1 之间";
+    if (!Number.isInteger(setup.k) || setup.k < 1 || setup.k >= setup.n) return "雌性精灵数量必须是 1 到总数减 1 之间的整数";
     if (setup.k < setup.kMand || setup.m < setup.mMand) {
       return `当前雌雄数量无法容纳必选精灵：必选至少需要 ♀${setup.kMand} / ♂${setup.mMand}，当前为 ♀${setup.k} / ♂${setup.m}`;
     }
@@ -466,6 +515,8 @@
   }
 
   function updateOptionalInfo() {
+    setSetupError("");
+    updateSpriteSummary();
     const infoEl = document.getElementById("optional-info");
     if (!infoEl) return;
 
@@ -513,14 +564,27 @@
     section.className = "mandatory-section";
     section.innerHTML = `
       <div class="mandatory-header">
-        <span class="mandatory-title">必选精灵配置 <span class="mandatory-hint">指定必选精灵的性别和蛋组</span></span>
+        <div>
+          <div class="mandatory-title">2 配置精灵</div>
+          <div class="mandatory-hint">先添加需要固定的精灵，再选择性别和蛋组；不配置也可以直接计算通用排布</div>
+        </div>
+        <span id="sprite-summary" class="sprite-summary"></span>
+      </div>
+      <div class="mandatory-subsection-header">
+        <div>
+          <span class="mandatory-subsection-title">必选精灵</span>
+          <span class="mandatory-hint">会固定参与本次计算</span>
+        </div>
         <button class="btn-add-sprite" id="btn-add-sprite" type="button">＋ 添加必选精灵</button>
       </div>
       <div id="mandatory-list" class="mandatory-list"></div>
       <div id="optional-info" class="optional-info" style="display:none"></div>
       <div class="optional-sprites-section">
-        <div class="mandatory-header">
-          <span class="mandatory-title">可选精灵配置 <span class="mandatory-hint">指定优先可选精灵的性别、蛋组和最多使用数量</span></span>
+        <div class="mandatory-subsection-header">
+          <div>
+            <span class="mandatory-subsection-title">可选精灵池</span>
+            <span class="mandatory-hint">按优先顺序补足剩余窝位</span>
+          </div>
           <button class="btn-add-sprite" id="btn-add-optional-sprite" type="button">＋ 添加可选精灵</button>
         </div>
         <div id="optional-list" class="mandatory-list"></div>
@@ -529,14 +593,30 @@
         </div>
         <div id="optional-pool-info" class="optional-pool-info" style="display:none"></div>
       </div>
+      <div id="setup-error" class="setup-error" role="alert" hidden></div>
     `;
     inputPanel.appendChild(section);
+    const heading = document.createElement("div");
+    heading.className = "setup-section-heading";
+    heading.textContent = "1 设置窝数与性别";
+    inputPanel.insertBefore(heading, inputSection);
+    const actionBar = document.createElement("div");
+    actionBar.className = "setup-actions";
+    const actionHint = document.createElement("span");
+    actionHint.textContent = "配置完成后计算，结果支持拖动微调和导出";
+    const solveButton = document.getElementById("btn-solve");
+    const oldButtonGroup = solveButton.closest(".button-group");
+    solveButton.textContent = "计算排布";
+    actionBar.append(actionHint, solveButton);
+    if (oldButtonGroup) oldButtonGroup.remove();
+    section.appendChild(actionBar);
     document.getElementById("btn-add-sprite").addEventListener("click", () => addSprite("mandatory"));
     document.getElementById("btn-add-optional-sprite").addEventListener("click", () => addSprite("optional"));
     document.getElementById("chk-only-optional").addEventListener("change", updateOptionalInfo);
   }
 
   const _countEdges = countEdges;
+  const _getConnections = getConnections;
   const _swapTypes = swapTypes;
   const _renderVisualization = renderVisualization;
   const _updateStats = updateStats;
@@ -570,6 +650,12 @@
     const ctx = getRuntimeContext(type0, type1);
     if (!ctx) return _countEdges(type0, type1);
     return countEdgesWithGroups(type0, type1, ctx.groups0, ctx.groups1);
+  };
+
+  getConnections = function(type0, type1) {
+    const connections = _getConnections(type0, type1);
+    const ctx = getRuntimeContext(type0, type1);
+    return ctx ? connections.filter(conn => canBreed(ctx.groups0[conn.type0Index], ctx.groups1[conn.type1Index])) : connections;
   };
 
   swapTypes = function(type0, type1) {
@@ -812,19 +898,13 @@
   };
 
   updateStats = function(result) {
-    if (State.k && State.m && MandatorySprites.length > 0) {
-      const theoretical = State.k * State.m - countIncompatibleMandatory(MandatorySprites);
-      _updateStats({ ...result, theoretical });
-      return;
-    }
-    _updateStats(result);
+    const theoretical = State.n > 0 && Number.isFinite(State.theoretical) ? State.theoretical : result.theoretical;
+    _updateStats({ ...result, theoretical });
   };
 
   solve = async function(n, k, updateProgress) {
     const m = n - k;
     const mandatorySprites = MandatorySprites;
-    const incompatible = countIncompatibleMandatory(mandatorySprites);
-    const theoreticalMax = k * m - incompatible;
     const boundary = Math.max(BOUNDARY_BASE, Math.ceil(n * BOUNDARY_SCALE));
 
     const mandFemales = mandatorySprites.filter(s => s.gender === 0);
@@ -836,7 +916,7 @@
       throw new Error(`必选精灵数量超过当前雌雄设置（必选♀${kMand}/♂${mMand}，当前♀${k}/♂${m}）`);
     }
 
-    const groups0 = mandFemales.map(s => s.eggGroups);
+    const groups0 = mandFemales.map(s => [...s.eggGroups]);
     const onlyFromOptionalEl = document.getElementById("chk-only-optional");
     const onlyFromOptional = !!(onlyFromOptionalEl && onlyFromOptionalEl.checked);
     const femaleNeed = k - kMand;
@@ -852,8 +932,9 @@
       throw new Error(`仅从可选精灵选择已启用：雄性可选精灵不足，还缺少 ${optionalMaleSelection.missing} 个。`);
     }
 
-    groups0.push(...optionalFemaleSelection.selected.map(s => (s ? s.eggGroups : null)));
-    const groups1 = mandMales.map(s => s.eggGroups).concat(optionalMaleSelection.selected.map(s => (s ? s.eggGroups : null)));
+    groups0.push(...optionalFemaleSelection.selected.map(s => (s ? [...s.eggGroups] : null)));
+    const groups1 = mandMales.map(s => [...s.eggGroups]).concat(optionalMaleSelection.selected.map(s => (s ? [...s.eggGroups] : null)));
+    const theoreticalMax = countCompatiblePairs(groups0, groups1);
     const remarks0 = mandFemales.map(s => (s.remark || "").trim()).concat(optionalFemaleSelection.selected.map(s => (s ? (s.remark || "").trim() : "")));
     const remarks1 = mandMales.map(s => (s.remark || "").trim()).concat(optionalMaleSelection.selected.map(s => (s ? (s.remark || "").trim() : "")));
     window.__solveContext = { groups0, groups1, kMand, mMand };
@@ -894,13 +975,15 @@
           LOCAL_MAX_ITERATIONS
         );
 
+        // 即使当前方案的有效配对数为 0，也必须保留其坐标，
+        // 否则在理论配对数为 0 或所有配对均受蛋组限制时会得到空解。
         if (bestType0 === null || optResult.edges > bestScore) {
           bestScore = optResult.edges;
           bestType0 = optResult.type0.map(p => [...p]);
           bestType1 = optResult.type1.map(p => [...p]);
 
-          if (theoreticalMax > 0 && bestScore >= theoreticalMax) {
-            updateProgress(100, `✓ 达到理论最优 ${theoreticalMax}，提前停止`);
+          if (bestScore >= theoreticalMax) {
+            updateProgress(100, theoreticalMax > 0 ? `✓ 达到理论最优 ${theoreticalMax}，提前停止` : "当前精灵之间没有兼容蛋组，已生成摆放方案");
             break;
           }
         }
@@ -908,9 +991,14 @@
         await new Promise(r => setTimeout(r, 1));
       }
 
+      if (!bestType0 || !bestType1) {
+        throw new Error("未找到有效的小窝排布方案");
+      }
       const normalized = normalizeCoordinates(bestType0, bestType1);
-      const reachRate = ((bestScore / theoreticalMax) * 100).toFixed(1);
-      updateProgress(100, `计算完成! 配对数: ${bestScore}/${theoreticalMax} (${reachRate}%)`);
+      const reachRate = theoreticalMax > 0
+        ? ((bestScore / theoreticalMax) * 100).toFixed(1)
+        : "0.0";
+      updateProgress(100, theoreticalMax > 0 ? `计算完成! 配对数: ${bestScore}/${theoreticalMax} (${reachRate}%)` : "当前精灵之间没有兼容蛋组，已生成摆放方案");
 
       return {
         n,
@@ -938,9 +1026,12 @@
     const setup = getSolveSetup();
     const error = validateSolveSetup(setup);
     if (error) {
-      alert(error);
+      setSetupError(error);
+      const invalidGroup = document.querySelector(".egg-group-trigger.has-error");
+      if (invalidGroup) invalidGroup.focus();
       return;
     }
+    setSetupError("");
 
     State.solving = true;
     document.getElementById("btn-solve").disabled = true;
@@ -952,6 +1043,7 @@
         n: result.n,
         k: result.k,
         m: result.m,
+        theoretical: result.theoretical,
         type0: result.type0,
         type1: result.type1,
         groups0: result.groups0,
@@ -1011,7 +1103,7 @@
       k: State.k,
       m: State.m,
       edges: countEdgesWithGroups(State.type0, State.type1, State.groups0, State.groups1),
-      theoretical: State.k * State.m - countIncompatibleMandatory(MandatorySprites)
+      theoretical: State.theoretical
     });
     renderVisualization();
     updateConnectionsList();
@@ -1034,6 +1126,7 @@
   function syncPatchedInputs() {
     updateType1Count();
     updateOptionalInfo();
+    if (!State.solving) setSetupError("");
   }
 
   function initPatchedUI() {
