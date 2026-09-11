@@ -626,7 +626,8 @@
                 font-size: 14px;
             }
         }
-    <link rel="stylesheet" href="styles.css">\n    </style>
+    </style>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="page-container">
@@ -1544,11 +1545,11 @@
             document.getElementById('stat-m').textContent = result.m;
             document.getElementById('stat-edges').textContent = result.edges;
 
-            const ratio = (result.edges / result.theoretical * 100).toFixed(1);
-            document.getElementById('stat-ratio').textContent = ratio + '%';
+            const ratio = result.theoretical > 0 ? (result.edges / result.theoretical * 100).toFixed(1) + '%' : '—';
+            document.getElementById('stat-ratio').textContent = ratio;
 
             const edgesItem = document.getElementById('stat-edges-item');
-            if (result.edges === result.theoretical) {
+            if (result.theoretical > 0 && result.edges === result.theoretical) {
                 edgesItem.classList.add('optimal');
             } else {
                 edgesItem.classList.remove('optimal');
@@ -1886,8 +1887,12 @@
                 type0: State.type0,
                 type1: State.type1,
                 edges: countEdges(State.type0, State.type1),
-                theoretical: State.k * State.m,
-                ratio: (countEdges(State.type0, State.type1) / (State.k * State.m) * 100).toFixed(2) + '%',
+                groups0: State.groups0,
+                groups1: State.groups1,
+                remarks0: State.remarks0,
+                remarks1: State.remarks1,
+                theoretical: State.theoretical,
+                ratio: State.theoretical > 0 ? (countEdges(State.type0, State.type1) / State.theoretical * 100).toFixed(2) + '%' : null,
                 connections: connections
             };
             const dataStr = JSON.stringify(exportData, null, 2);
