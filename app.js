@@ -492,7 +492,7 @@
   }
 
   function validateSolveSetup(setup) {
-    if (!Number.isInteger(setup.n) || setup.n < 2 || setup.n > 11) return "小窝总数必须是 2-11 之间的整数";
+    if (!Number.isInteger(setup.n) || setup.n < 2 || setup.n > 12) return "小窝总数必须是 2-12 之间的整数";
     if (MandatorySprites.length > setup.n) {
       return `必选精灵数量（${MandatorySprites.length}）不能超过小窝总数（${setup.n}）`;
     }
